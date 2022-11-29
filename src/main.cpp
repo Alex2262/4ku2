@@ -544,12 +544,13 @@ int alphabeta(Position &pos,
     for (int j = 0; j < num_moves; ++j) {
         int move_score = 0;
         const int capture = piece_on(pos, moves[j].to);
+        const int selected = piece_on(pos, moves[j].from);
         if (!in_qsearch && moves[j] == tt_move) {
             move_score = 1 << 16;
         } else {
             if (capture != None) {
-                move_score = (capture + 1) * (1 << 10) - piece_on(pos, moves[j].from);
-            } else if (!in_qsearch && moves[j].to == lsb(pos.ep)) {
+                move_score = (capture + 1) * (1 << 10) - selected;
+            } else if (selected == Pawn && moves[j].to == lsb(pos.ep)) {
                 move_score = 2047;  // (1 + 1) * (1 << 10) - 1;
             } else if (moves[j] == stack[ply].killer) {
                 move_score = 1 << 8;
@@ -580,8 +581,10 @@ int alphabeta(Position &pos,
         moves[best_move_index] = moves[i];
         move_scores[best_move_index] = move_scores[i];
 
+        const bool capturing_move = piece_on(pos, move.to) != None ||
+                                    (piece_on(pos, move.from) == Pawn && move.to == lsb(pos.ep));
         // qsearch needs captures only
-        if (in_qsearch && piece_on(pos, move.to) == None) {
+        if (in_qsearch && !capturing_move) {
             break;
         }
 
@@ -619,8 +622,8 @@ int alphabeta(Position &pos,
 
         if (alpha >= beta) {
             tt_flag = 2;  // Beta flag
-            const int capture = piece_on(pos, move.to);
-            if (capture == None) {
+
+            if (!capturing_move) {
                 hh_table[move.from][move.to] += depth * depth;
                 stack[ply].killer = move;
             }
