@@ -548,7 +548,9 @@ int alphabeta(Position &pos,
             move_score = 1 << 16;
         } else {
             if (capture != None) {
-                move_score = ((capture + 1) * (1 << 10)) - piece_on(pos, moves[j].from);
+                move_score = (capture + 1) * (1 << 10) - piece_on(pos, moves[j].from);
+            } else if (!in_qsearch && moves[j].to == lsb(pos.ep)) {
+                move_score = 2047;  // (1 + 1) * (1 << 10) - 1;
             } else if (moves[j] == stack[ply].killer) {
                 move_score = 1 << 8;
             }
