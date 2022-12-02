@@ -385,6 +385,10 @@ def rename(tokens):
         "allocated_time":"dk",
         "stops":"dl",
         "stop":"dm",
+        "winc":"dn",
+        "binc":"do",
+        "self_time":"dp",
+        "self_inc":"dq",
         # Labels
         "do_search":"bk",
         "full_search":"bl",

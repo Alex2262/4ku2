@@ -587,8 +587,10 @@ int alphabeta(Position &pos,
         moves[best_move_index] = moves[i];
         move_scores[best_move_index] = move_scores[i];
 
+        const bool non_capturing_move = piece_on(pos, move.to) == None;
+
         // qsearch needs captures only
-        if (in_qsearch && piece_on(pos, move.to) == None) {
+        if (in_qsearch && non_capturing_move) {
             break;
         }
 
@@ -637,10 +639,10 @@ int alphabeta(Position &pos,
 
         if (alpha >= beta) {
             tt_flag = 2;  // Beta flag
-            const int capture = piece_on(pos, move.to);
-            if (capture == None) {
-                hh_table[move.from][move.to] += depth * depth;
+            if (non_capturing_move) {
                 stack[ply].killer = move;
+                auto &hh_entry = hh_table[move.from][move.to];
+                hh_entry -= (hh_entry * abs(depth * (depth + 1) - 1)) / 324 + (depth * (depth + 1) - 1) * 32;
             }
             break;
         }
@@ -715,12 +717,21 @@ int main() {
         } else if (word == "go") {
             int wtime;
             int btime;
+            int winc;
+            int binc;
             cin >> word;
             cin >> wtime;
             cin >> word;
             cin >> btime;
+            cin >> word;
+            cin >> winc;
+            cin >> word;
+            cin >> binc;
+            const int self_time = (pos.flipped ? btime : wtime);
+            const int self_inc = (pos.flipped ? binc : winc);
+
             const auto start = now();
-            const auto allocated_time = (pos.flipped ? btime : wtime) / 4;
+            const auto allocated_time = self_time / 4 + int(4 * self_inc >= 9 * self_time ? 0: self_inc / 0.3);
 
             // Lazy SMP
             vector<thread> threads;
