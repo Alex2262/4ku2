@@ -456,14 +456,14 @@ int alphabeta(Position &pos,
               const int beta,
               int depth,
               const int ply,
-              const long long int stop_time,
+              const int64_t stop_time,
+              int &stop,
               Stack *const stack,
               uint64_t (&hh_table)[64][64],
               vector<uint64_t> &hash_history,
               const int do_null = true) {
     const auto in_check = attacked(pos, lsb(pos.colour[0] & pos.pieces[King]));
     const int static_eval = eval(pos);
-    int raised_alpha = false;
 
     // Check extensions
     depth += in_check;
@@ -502,16 +502,24 @@ int alphabeta(Position &pos,
             auto npos = pos;
             flip(npos);
             npos.ep = 0;
-            if (-alphabeta(
-                    npos, -beta, -beta + 1, depth - 3, ply + 1, stop_time, stack, hh_table, hash_history, false) >=
-                beta) {
+            if (-alphabeta(npos,
+                           -beta,
+                           -beta + 1,
+                           depth - 3,
+                           ply + 1,
+                           stop_time,
+                           stop,
+                           stack,
+                           hh_table,
+                           hash_history,
+                           false) >= beta) {
                 return beta;
             }
         }
 
         // Razoring
         if (depth == 1 && !in_check && static_eval + 300 < alpha) {
-            return alphabeta(pos, alpha, beta, 0, ply, stop_time, stack, hh_table, hash_history, do_null);
+            return alphabeta(pos, alpha, beta, 0, ply, stop_time, stop, stack, hh_table, hash_history, do_null);
         }
     }
 
@@ -532,7 +540,7 @@ int alphabeta(Position &pos,
     }
 
     // Exit early if out of time
-    if (now() >= stop_time) {
+    if (stop || now() >= stop_time) {
         return 0;
     }
 
@@ -556,6 +564,7 @@ int alphabeta(Position &pos,
         move_scores[j] = move_score;
     }
 
+    int moves_evaluated = 0;
     int best_score = -INF;
     Move best_move{};
     uint16_t tt_flag = 1;  // Alpha flag
@@ -589,14 +598,31 @@ int alphabeta(Position &pos,
         }
 
         int score;
-        if (in_qsearch || !raised_alpha) {
+        if (in_qsearch || !moves_evaluated) {
         full_window:
-            score = -alphabeta(npos, -beta, -alpha, depth - 1, ply + 1, stop_time, stack, hh_table, hash_history);
+            score = -alphabeta(npos, -beta, -alpha, depth - 1, ply + 1, stop_time, stop, stack, hh_table, hash_history);
         } else {
-            score = -alphabeta(npos, -alpha - 1, -alpha, depth - 1, ply + 1, stop_time, stack, hh_table, hash_history);
-            if (score > alpha) {
+            // Zero window search with late move reduction
+            score = -alphabeta(npos,
+                               -alpha - 1,
+                               -alpha,
+                               depth - (depth > 3 && moves_evaluated > 3) - 1,
+                               ply + 1,
+                               stop_time,
+                               stop,
+                               stack,
+                               hh_table,
+                               hash_history);
+            if (score > alpha && score < beta) {
                 goto full_window;
             }
+        }
+        moves_evaluated++;
+
+        // Exit early if out of time
+        if (stop || now() >= stop_time) {
+            hash_history.pop_back();
+            return 0;
         }
 
         if (score > best_score) {
@@ -604,7 +630,6 @@ int alphabeta(Position &pos,
             best_move = move;
             if (score > alpha) {
                 tt_flag = 0;  // Exact flag
-                raised_alpha = true;
                 alpha = score;
                 stack[ply].move = move;
             }
@@ -627,26 +652,46 @@ int alphabeta(Position &pos,
         return in_check ? ply - MATE_SCORE : 0;
     }
 
-    // Save to TT if didn't run out of time
-    if (!in_qsearch && (tt_entry.key != tt_key || depth >= tt_entry.depth || tt_flag == 0) && now() < stop_time) {
+    // Save to TT
+    if (!in_qsearch && (tt_entry.key != tt_key || depth >= tt_entry.depth || tt_flag == 0)) {
         tt_entry = TT_Entry{tt_key, best_move, best_score, depth, tt_flag};
     }
 
     return alpha;
 }
 
-Move iteratively_deepen(Position &pos, vector<uint64_t> &hash_history, const int64_t stop_time) {
-    Move best_move;
+Move iteratively_deepen(Position &pos,
+                        vector<uint64_t> &hash_history,
+                        // minify delete on
+                        int thread_id,
+                        // minify delete off
+                        const int64_t start_time,
+                        const int allocated_time,
+                        int &stop) {
     Stack stack[128] = {};
     uint64_t hh_table[64][64] = {};
+
     for (int i = 1; i < 128; ++i) {
-        alphabeta(pos, -INF, INF, i, 0, stop_time, stack, hh_table, hash_history);
-        if (now() >= stop_time) {
+        // minify delete on
+        const int score =
+            // minify delete off
+            alphabeta(pos, -INF, INF, i, 0, start_time + allocated_time, stop, stack, hh_table, hash_history);
+
+        if (stop || now() >= start_time + allocated_time / 10) {
             break;
         }
-        best_move = stack[0].move;
+
+        // minify delete on
+        if (thread_id == 0) {
+            cout << "info";
+            cout << " depth " << i;
+            cout << " score cp " << score;
+            cout << " pv " << move_str(stack[0].move, pos.flipped);
+            cout << endl;
+        }
+        // minify delete off
     }
-    return best_move;
+    return stack[0].move;
 }
 
 int main() {
@@ -655,7 +700,7 @@ int main() {
     vector<uint64_t> hash_history;
     Move moves[256];
     getchar();
-    puts("id name 4ku2\nid author kz04px\nuciok");
+    puts("id name 4ku\nid author kz04px\nuciok");
     transposition_table.resize(MAX_TT_SIZE);
     memset(transposition_table.data(), 0, sizeof(TT_Entry) * transposition_table.size());
     while (true) {
@@ -674,14 +719,36 @@ int main() {
             cin >> wtime;
             cin >> word;
             cin >> btime;
-            const auto stop_time = now() + (pos.flipped ? btime : wtime) / 30;
+            const auto start = now();
+            const auto allocated_time = (pos.flipped ? btime : wtime) / 4;
 
             // Lazy SMP
             vector<thread> threads;
+            vector<int> stops = {false};
             for (int i = 1; i < thread_count; ++i) {
-                threads.emplace_back([=]() mutable { iteratively_deepen(pos, hash_history, stop_time); });
+                stops.emplace_back(false);
+                threads.emplace_back([=, &stops]() mutable {
+                    iteratively_deepen(pos,
+                                       hash_history,
+                                       // minify delete on
+                                       i,
+                                       // minify delete off
+                                       start,
+                                       1 << 30,
+                                       stops[i]);
+                });
             }
-            const auto best_move = iteratively_deepen(pos, hash_history, stop_time);
+            const auto best_move = iteratively_deepen(pos,
+                                                      hash_history,
+                                                      // minify delete on
+                                                      0,
+                                                      // minify delete off
+                                                      start,
+                                                      allocated_time,
+                                                      stops[0]);
+            for (int i = 1; i < thread_count; ++i) {
+                stops[i] = true;
+            }
             for (int i = 1; i < thread_count; ++i) {
                 threads[i - 1].join();
             }

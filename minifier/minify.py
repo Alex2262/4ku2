@@ -37,6 +37,34 @@ def get_tokens(src):
 def filter_empty(tokens):
     return [n for n in tokens if n]
 
+def filter_delete(tokens):
+    new = []
+    in_comment = False
+    chunk = []
+    skip = False
+
+    for i in range(len(tokens)):
+        prev = tokens[i-1] if i > 0 else None
+        curr = tokens[i]
+        next = tokens[i+1] if i+1 < len(tokens) else None
+
+        if curr == "/" and next == "/":
+            in_comment = True
+        elif curr == "\n":
+            in_comment = False
+            if chunk == ['/', '/', ' ', 'minify', ' ', 'delete', ' ', 'on']:
+                skip = True
+            elif chunk == ['/', '/', ' ', 'minify', ' ', 'delete', ' ', 'off']:
+                skip = False
+            chunk = []
+
+        if in_comment:
+            chunk.append(curr)
+        elif not skip:
+            new.append(curr)
+
+    return new
+
 def filter_comments(tokens):
     new = []
     in_comment = False
@@ -329,7 +357,7 @@ def rename(tokens):
         "phases":"ch",
         "do_null":"ci",
         "full_window":"cj",
-        "raised_alpha":"ck",
+        "moves_evaluated":"ck",
         "keys":"cl",
         "transposition_table":"cm",
         "tt_key":"cn",
@@ -353,6 +381,10 @@ def rename(tokens):
         "shield": "dg",
         "king_shield": "dh",
         "key":"di",
+        "start_time":"dj",
+        "allocated_time":"dk",
+        "stops":"dl",
+        "stop":"dm",
         # Labels
         "do_search":"bk",
         "full_search":"bl",
@@ -402,7 +434,7 @@ def main():
     args = get_args()
 
     if not os.path.isfile(args.src):
-        raise exception("File not found")
+        raise Exception("File not found")
 
     src = get_source(args.src)
 
@@ -410,6 +442,7 @@ def main():
 
     src = get_tokens(src)
     src = filter_empty(src)
+    src = filter_delete(src)
     src = filter_comments(src)
     src = filter_block_comments(src)
     src = filter_newlines(src)
