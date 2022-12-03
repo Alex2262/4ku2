@@ -731,7 +731,7 @@ int main() {
             const int self_inc = (pos.flipped ? binc : winc);
 
             const auto start = now();
-            const auto allocated_time = self_time / 4 + int(4 * self_inc >= 9 * self_time ? 0: self_inc / 0.3);
+            const auto allocated_time = self_time / 4 + int(6 * self_inc >= 15 * self_time ? 0: self_inc / 0.3);
 
             // Lazy SMP
             vector<thread> threads;
