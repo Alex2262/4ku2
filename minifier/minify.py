@@ -413,6 +413,7 @@ def rename(tokens):
         "stop":"dm",
         "only_captures":"dn",
         "pv_node":"do",
+        "quiet":"dp",
         # Labels
         "do_search":"bk",
         "full_search":"bl",
