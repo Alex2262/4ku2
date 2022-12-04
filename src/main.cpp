@@ -719,7 +719,6 @@ Move iteratively_deepen(Position &pos,
 
     int alpha = -INF;
     int beta = INF;
-    int window = 45;
 
     for (int i = 1; i < 128; ++i) {
         // minify delete on
@@ -743,13 +742,11 @@ Move iteratively_deepen(Position &pos,
         if (score <= alpha || score >= beta) {
             alpha = -INF;
             beta = INF;
-            window = 45;
             goto do_search;
         }
 
-        alpha = score - window;
-        beta = score + window;
-        window -= 20 / int(i + 3);
+        alpha = score - 45;
+        beta = score + 45;
 
         if (stop || now() >= start_time + allocated_time / 10) {
             break;
