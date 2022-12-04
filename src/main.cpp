@@ -477,6 +477,7 @@ int alphabeta(Position &pos,
               const int do_null = true) {
     const auto in_check = attacked(pos, lsb(pos.colour[0] & pos.pieces[King]));
     const int static_eval = eval(pos);
+    const bool pv_node = alpha != beta - 1;
 
     // Check extensions
     depth += in_check;
@@ -615,6 +616,8 @@ int alphabeta(Position &pos,
         const auto move = moves[best_move_index];
         moves[best_move_index] = moves[i];
         move_scores[best_move_index] = move_scores[i];
+
+        if (depth <= 3 && !pv_node && moves_evaluated > depth * 8) break;
 
         auto npos = pos;
         if (!makemove(npos, move)) {

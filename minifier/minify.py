@@ -412,6 +412,7 @@ def rename(tokens):
         "stops":"dl",
         "stop":"dm",
         "only_captures":"dn",
+        "pv_node":"do",
         # Labels
         "do_search":"bk",
         "full_search":"bl",
