@@ -717,13 +717,18 @@ Move iteratively_deepen(Position &pos,
     int64_t nodes = 0;
     // minify delete off
 
+    int alpha = -INF;
+    int beta = -INF;
+    int window = 45;
+
     for (int i = 1; i < 128; ++i) {
         // minify delete on
+    do_search:
         const int score =
             // minify delete off
             alphabeta(pos,
-                      -INF,
-                      INF,
+                      -alpha,
+                      beta,
                       i,
                       0,
                       // minify delete on
@@ -734,6 +739,17 @@ Move iteratively_deepen(Position &pos,
                       stack,
                       hh_table,
                       hash_history);
+
+        if (score <= alpha || score >= beta) {
+            alpha = -INF;
+            beta = -INF;
+            window = 45;
+            goto do_search;
+        }
+
+        alpha = score - window;
+        beta = score + window;
+        window -= 20 / int(i + 3);
 
         if (stop || now() >= start_time + allocated_time / 10) {
             break;
