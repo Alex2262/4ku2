@@ -727,7 +727,7 @@ Move iteratively_deepen(Position &pos,
         const int score =
             // minify delete off
             alphabeta(pos,
-                      -alpha,
+                      alpha,
                       beta,
                       i,
                       0,
