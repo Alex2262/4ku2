@@ -475,13 +475,12 @@ int alphabeta(Position &pos,
               uint64_t (&hh_table)[64][64],
               vector<uint64_t> &hash_history,
               const int do_null = true) {
-    const auto in_check = attacked(pos, lsb(pos.colour[0] & pos.pieces[King]));
     const int static_eval = eval(pos);
+    const int in_qsearch = depth <= 0;
+    const auto in_check = in_qsearch ? false : attacked(pos, lsb(pos.colour[0] & pos.pieces[King]));
 
     // Check extensions
     depth += in_check;
-
-    const int in_qsearch = depth <= 0;
 
     // TT probing
     const uint64_t tt_key = in_qsearch ? 0 : get_hash(pos);
@@ -504,7 +503,7 @@ int alphabeta(Position &pos,
         }
 
         // Reverse futility pruning
-        if (depth < 3) {
+        if (!in_check && depth < 3) {
             const int margin = 120;
             if (static_eval - margin * depth >= beta) {
                 return beta;
@@ -717,13 +716,18 @@ Move iteratively_deepen(Position &pos,
     int64_t nodes = 0;
     // minify delete off
 
+    int alpha = -INF;
+    int beta = -INF;
+    int window = 45;
+
     for (int i = 1; i < 128; ++i) {
         // minify delete on
+    do_search:
         const int score =
             // minify delete off
             alphabeta(pos,
-                      -INF,
-                      INF,
+                      -alpha,
+                      beta,
                       i,
                       0,
                       // minify delete on
@@ -734,6 +738,17 @@ Move iteratively_deepen(Position &pos,
                       stack,
                       hh_table,
                       hash_history);
+
+        if (score <= alpha || score >= beta) {
+            alpha = -INF;
+            beta = -INF;
+            window = 45;
+            goto do_search;
+        }
+
+        alpha = score - window;
+        beta = score + window;
+        window -= 20 / int(i + 3);
 
         if (stop || now() >= start_time + allocated_time / 10) {
             break;
