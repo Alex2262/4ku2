@@ -617,7 +617,9 @@ int alphabeta(Position &pos,
         moves[best_move_index] = moves[i];
         move_scores[best_move_index] = move_scores[i];
 
-        if (depth <= 3 && !pv_node && moves_evaluated > depth * 8) break;
+        if (depth <= 3 && !pv_node && moves_evaluated > depth * 10) {
+            break;
+        }
 
         auto npos = pos;
         if (!makemove(npos, move)) {
