@@ -617,7 +617,9 @@ int alphabeta(Position &pos,
         moves[best_move_index] = moves[i];
         move_scores[best_move_index] = move_scores[i];
 
-        if (!in_qsearch && depth <= 3 && !pv_node && moves_evaluated > depth * 12) {
+        const int quiet = piece_on(pos, move.to) == None;
+
+        if (quiet && depth < 3 && !pv_node && moves_evaluated > depth * 10) {
             break;
         }
 
@@ -685,8 +687,7 @@ int alphabeta(Position &pos,
 
         if (alpha >= beta) {
             tt_flag = 2;  // Beta flag
-            const int capture = piece_on(pos, move.to);
-            if (capture == None) {
+            if (quiet) {
                 hh_table[move.from][move.to] += depth * depth;
                 stack[ply].killer = move;
             }
