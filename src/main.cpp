@@ -77,8 +77,8 @@ const auto keys = []() {
 }();
 
 // Engine options
-const int MAX_TT_SIZE = 2000000;
-const int thread_count = 1;
+int num_tt_entries = 64 << 15;  // The first value is the size in megabytes
+int thread_count = 1;
 
 vector<TT_Entry> transposition_table;
 
@@ -289,12 +289,13 @@ void generate_piece_moves(Move *const movelist,
                           int &num_moves,
                           const Position &pos,
                           const int piece,
+                          const BB to_mask,
                           BB (*func)(int, BB)) {
     BB copy = pos.colour[0] & pos.pieces[piece];
     while (copy) {
         const int fr = lsb(copy);
         copy &= copy - 1;
-        BB moves = func(fr, pos.colour[0] | pos.colour[1]) & ~pos.colour[0];
+        BB moves = func(fr, pos.colour[0] | pos.colour[1]) & to_mask;
         while (moves) {
             const int to = lsb(moves);
             moves &= moves - 1;
@@ -303,24 +304,27 @@ void generate_piece_moves(Move *const movelist,
     }
 }
 
-[[nodiscard]] int movegen(const Position &pos, Move *const movelist) {
+[[nodiscard]] int movegen(const Position &pos, Move *const movelist, const bool only_captures) {
     int num_moves = 0;
     const BB all = pos.colour[0] | pos.colour[1];
+    const BB to_mask = only_captures ? pos.colour[1] : ~pos.colour[0];
     const BB pawns = pos.colour[0] & pos.pieces[Pawn];
-    generate_pawn_moves(movelist, num_moves, north(pawns) & ~all, -8);
-    generate_pawn_moves(movelist, num_moves, north(north(pawns & 0xFF00ULL) & ~all) & ~all, -16);
+    if (!only_captures) {
+        generate_pawn_moves(movelist, num_moves, north(pawns) & ~all, -8);
+        generate_pawn_moves(movelist, num_moves, north(north(pawns & 0xFF00ULL) & ~all) & ~all, -16);
+    }
     generate_pawn_moves(movelist, num_moves, nw(pawns) & (pos.colour[1] | pos.ep), -7);
     generate_pawn_moves(movelist, num_moves, ne(pawns) & (pos.colour[1] | pos.ep), -9);
-    generate_piece_moves(movelist, num_moves, pos, Knight, knight);
-    generate_piece_moves(movelist, num_moves, pos, Bishop, bishop);
-    generate_piece_moves(movelist, num_moves, pos, Queen, bishop);
-    generate_piece_moves(movelist, num_moves, pos, Rook, rook);
-    generate_piece_moves(movelist, num_moves, pos, Queen, rook);
-    generate_piece_moves(movelist, num_moves, pos, King, king);
-    if (pos.castling[0] && !(all & 0x60ULL) && !attacked(pos, 4) && !attacked(pos, 5)) {
+    generate_piece_moves(movelist, num_moves, pos, Knight, to_mask, knight);
+    generate_piece_moves(movelist, num_moves, pos, Bishop, to_mask, bishop);
+    generate_piece_moves(movelist, num_moves, pos, Queen, to_mask, bishop);
+    generate_piece_moves(movelist, num_moves, pos, Rook, to_mask, rook);
+    generate_piece_moves(movelist, num_moves, pos, Queen, to_mask, rook);
+    generate_piece_moves(movelist, num_moves, pos, King, to_mask, king);
+    if (!only_captures && pos.castling[0] && !(all & 0x60ULL) && !attacked(pos, 4) && !attacked(pos, 5)) {
         add_move(movelist, num_moves, 4, 6);
     }
-    if (pos.castling[1] && !(all & 0xEULL) && !attacked(pos, 4) && !attacked(pos, 3)) {
+    if (!only_captures && pos.castling[1] && !(all & 0xEULL) && !attacked(pos, 4) && !attacked(pos, 3)) {
         add_move(movelist, num_moves, 4, 2);
     }
     return num_moves;
@@ -437,15 +441,21 @@ const int king_shield[] = {S(23, -10), S(10, -15)};
 
 [[nodiscard]] auto get_hash(const Position &pos) {
     uint64_t hash = 0;
+
+    // Pieces
     BB copy = pos.colour[0] | pos.colour[1];
     while (copy) {
         const int sq = lsb(copy);
         copy &= copy - 1;
         hash ^= keys[(piece_on(pos, sq) + 6 * ((pos.colour[pos.flipped] >> sq) & 1)) * 64 + sq];
     }
+
+    // En passant square
     if (pos.ep) {
         hash ^= keys[768 + lsb(pos.ep)];
     }
+
+    // Castling permissions
     hash ^= keys[832 + (pos.castling[0] | pos.castling[1] << 1 | pos.castling[2] << 2 | pos.castling[3] << 3)];
 
     return hash;
@@ -456,6 +466,9 @@ int alphabeta(Position &pos,
               const int beta,
               int depth,
               const int ply,
+              // minify delete on
+              int64_t &nodes,
+              // minify delete off
               const int64_t stop_time,
               int &stop,
               Stack *const stack,
@@ -472,7 +485,7 @@ int alphabeta(Position &pos,
 
     // TT probing
     const uint64_t tt_key = in_qsearch ? 0 : get_hash(pos);
-    TT_Entry &tt_entry = transposition_table[tt_key % MAX_TT_SIZE];
+    TT_Entry &tt_entry = transposition_table[tt_key % num_tt_entries];
     Move tt_move{};
 
     if (in_qsearch) {
@@ -507,6 +520,9 @@ int alphabeta(Position &pos,
                            -beta + 1,
                            depth - 3,
                            ply + 1,
+                           // minify delete on
+                           nodes,
+                           // minify delete off
                            stop_time,
                            stop,
                            stack,
@@ -519,7 +535,20 @@ int alphabeta(Position &pos,
 
         // Razoring
         if (depth == 1 && !in_check && static_eval + 300 < alpha) {
-            return alphabeta(pos, alpha, beta, 0, ply, stop_time, stop, stack, hh_table, hash_history, do_null);
+            return alphabeta(pos,
+                             alpha,
+                             beta,
+                             0,
+                             ply,
+                             // minify delete on
+                             nodes,
+                             // minify delete off
+                             stop_time,
+                             stop,
+                             stack,
+                             hh_table,
+                             hash_history,
+                             do_null);
         }
     }
 
@@ -545,14 +574,14 @@ int alphabeta(Position &pos,
     }
 
     Move moves[256];
-    const int num_moves = movegen(pos, moves);
+    const int num_moves = movegen(pos, moves, in_qsearch);
 
     // Score moves
     int move_scores[256];
     for (int j = 0; j < num_moves; ++j) {
         int move_score = 0;
         const int capture = piece_on(pos, moves[j].to);
-        if (!in_qsearch && moves[j] == tt_move) {
+        if (moves[j] == tt_move) {
             move_score = 1 << 16;
         } else {
             if (capture != None) {
@@ -587,20 +616,31 @@ int alphabeta(Position &pos,
         moves[best_move_index] = moves[i];
         move_scores[best_move_index] = move_scores[i];
 
-        // qsearch needs captures only
-        if (in_qsearch && piece_on(pos, move.to) == None) {
-            break;
-        }
-
         auto npos = pos;
         if (!makemove(npos, move)) {
             continue;
         }
 
+        // minify delete on
+        nodes++;
+        // minify delete off
+
         int score;
         if (in_qsearch || !moves_evaluated) {
         full_window:
-            score = -alphabeta(npos, -beta, -alpha, depth - 1, ply + 1, stop_time, stop, stack, hh_table, hash_history);
+            score = -alphabeta(npos,
+                               -beta,
+                               -alpha,
+                               depth - 1,
+                               ply + 1,
+                               // minify delete on
+                               nodes,
+                               // minify delete off
+                               stop_time,
+                               stop,
+                               stack,
+                               hh_table,
+                               hash_history);
         } else {
             // Zero window search with late move reduction
             score = -alphabeta(npos,
@@ -608,6 +648,9 @@ int alphabeta(Position &pos,
                                -alpha,
                                depth - (depth > 3 && moves_evaluated > 3) - 1,
                                ply + 1,
+                               // minify delete on
+                               nodes,
+                               // minify delete off
                                stop_time,
                                stop,
                                stack,
@@ -670,12 +713,27 @@ Move iteratively_deepen(Position &pos,
                         int &stop) {
     Stack stack[128] = {};
     uint64_t hh_table[64][64] = {};
+    // minify delete on
+    int64_t nodes = 0;
+    // minify delete off
 
     for (int i = 1; i < 128; ++i) {
         // minify delete on
         const int score =
             // minify delete off
-            alphabeta(pos, -INF, INF, i, 0, start_time + allocated_time, stop, stack, hh_table, hash_history);
+            alphabeta(pos,
+                      -INF,
+                      INF,
+                      i,
+                      0,
+                      // minify delete on
+                      nodes,
+                      // minify delete off
+                      start_time + allocated_time,
+                      stop,
+                      stack,
+                      hh_table,
+                      hash_history);
 
         if (stop || now() >= start_time + allocated_time / 10) {
             break;
@@ -683,9 +741,16 @@ Move iteratively_deepen(Position &pos,
 
         // minify delete on
         if (thread_id == 0) {
+            const auto elapsed = now() - start_time;
+
             cout << "info";
             cout << " depth " << i;
             cout << " score cp " << score;
+            cout << " time " << elapsed;
+            cout << " nodes " << nodes;
+            if (elapsed > 0) {
+                cout << " nps " << nodes * 1000 / elapsed;
+            }
             cout << " pv " << move_str(stack[0].move, pos.flipped);
             cout << endl;
         }
@@ -699,10 +764,23 @@ int main() {
     Position pos;
     vector<uint64_t> hash_history;
     Move moves[256];
+
+    // Wait for "uci"
     getchar();
-    puts("id name 4ku\nid author kz04px\nuciok");
-    transposition_table.resize(MAX_TT_SIZE);
+
+    // Send UCI info
+    puts("id name 4ku");
+    puts("id author kz04px");
+    // minify delete on
+    cout << "option name Threads type spin default " << thread_count << " min 1 max 256\n";
+    cout << "option name Hash type spin default " << (num_tt_entries >> 15) << " min 1 max 1024\n";
+    // minify delete off
+    puts("uciok");
+
+    // Initialise the TT
+    transposition_table.resize(num_tt_entries);
     memset(transposition_table.data(), 0, sizeof(TT_Entry) * transposition_table.size());
+
     while (true) {
         string word;
         cin >> word;
@@ -712,7 +790,25 @@ int main() {
             memset(transposition_table.data(), 0, sizeof(TT_Entry) * transposition_table.size());
         } else if (word == "isready") {
             puts("readyok");
-        } else if (word == "go") {
+        }
+        // minify delete on
+        else if (word == "setoption") {
+            cin >> word;
+            cin >> word;
+            if (word == "Threads") {
+                cin >> word;
+                cin >> thread_count;
+                thread_count = max(1, min(256, thread_count));
+            } else if (word == "Hash") {
+                cin >> word;
+                cin >> num_tt_entries;
+                num_tt_entries = min(max(num_tt_entries, 1), 1024) * 1024 * 1024 / sizeof(TT_Entry);
+                transposition_table.resize(num_tt_entries);
+                memset(transposition_table.data(), 0, sizeof(TT_Entry) * transposition_table.size());
+            }
+        }
+        // minify delete off
+        else if (word == "go") {
             int wtime;
             int btime;
             cin >> word;
@@ -724,9 +820,8 @@ int main() {
 
             // Lazy SMP
             vector<thread> threads;
-            vector<int> stops = {false};
+            vector<int> stops(thread_count, false);
             for (int i = 1; i < thread_count; ++i) {
-                stops.emplace_back(false);
                 threads.emplace_back([=, &stops]() mutable {
                     iteratively_deepen(pos,
                                        hash_history,
@@ -758,7 +853,7 @@ int main() {
             pos = Position();
             hash_history.clear();
         } else {
-            const int num_moves = movegen(pos, moves);
+            const int num_moves = movegen(pos, moves, false);
             for (int i = 0; i < num_moves; ++i) {
                 if (word == move_str(moves[i], pos.flipped)) {
                     if (piece_on(pos, moves[i].to) != None || piece_on(pos, moves[i].from) == Pawn) {
